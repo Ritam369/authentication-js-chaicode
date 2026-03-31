@@ -1,6 +1,6 @@
 import crypto from "crypto"
 import ApiError from "../../common/utils/api-error.js";
-import { generateResetToken } from "../../common/utils/jwt.utils.js";
+import { generateResetToken, generateAccessToken, generateRefreshToken, verifyAccessToken, verifyRefreshToken } from "../../common/utils/jwt.utils.js";
 import User from "./auth.model.js"
 
 const hashCreation = (pass) =>
@@ -32,4 +32,31 @@ const register = async ({ fname, lname, email, password, role }) => {
   return userObj;
 };
 
-export {register}
+const login = async ({ email, password }) => {
+  const user = await User.findOne({ email }).select("+password");
+  if (!user) throw ApiError.unauthorized("Invalid email or password");
+
+  const hashedPassword = hashCreation(password);
+
+  const isMatch = hashedPassword === user.password;
+  if (!isMatch) throw ApiError.unauthorized("Invalid email or password");
+
+//   if (!user.isVerified) {
+//     throw ApiError.forbidden("Please verify your email before logging in");
+//   }
+
+  const accessToken = generateAccessToken({ id: user._id, role: user.role });
+  const refreshToken = generateRefreshToken({ id: user._id });
+
+  // Store hashed refresh token in DB so it can be invalidated on logout
+  user.refreshToken = hashCreation(refreshToken);
+  await user.save({ validateBeforeSave: false });
+
+  const userObj = user.toObject();
+  delete userObj.password;
+  delete userObj.refreshToken;
+
+  return { user: userObj, accessToken, refreshToken };
+};
+
+export { register, login }
