@@ -3,7 +3,7 @@ import ApiError from "../../common/utils/api-error.js";
 import { generateResetToken, generateAccessToken, generateRefreshToken, verifyAccessToken, verifyRefreshToken } from "../../common/utils/jwt.utils.js";
 import User from "./auth.model.js"
 
-const hashCreation = (pass) =>
+const hashToken = (pass) =>
   crypto.createHash("sha256").update(pass).digest("hex");
 
 const register = async ({ fname, lname, email, password, role }) => {
@@ -12,13 +12,11 @@ const register = async ({ fname, lname, email, password, role }) => {
 
   const { rawToken, hashedToken } = generateResetToken();
 
-  const newPassword = hashCreation(password);
-
   const user = await User.create({
     fname,
     lname,
     email,
-    password: newPassword,
+    password,
     role,
     verificationToken: hashedToken,
   });
@@ -36,9 +34,8 @@ const login = async ({ email, password }) => {
   const user = await User.findOne({ email }).select("+password");
   if (!user) throw ApiError.unauthorized("Invalid email or password");
 
-  const hashedPassword = hashCreation(password);
 
-  const isMatch = hashedPassword === user.password;
+  const isMatch = await user.comparePassword(password);
   if (!isMatch) throw ApiError.unauthorized("Invalid email or password");
 
 //   if (!user.isVerified) {
@@ -49,7 +46,7 @@ const login = async ({ email, password }) => {
   const refreshToken = generateRefreshToken({ id: user._id });
 
   // Store hashed refresh token in DB so it can be invalidated on logout
-  user.refreshToken = hashCreation(refreshToken);
+  user.refreshToken = hashToken(refreshToken);
   await user.save({ validateBeforeSave: false });
 
   const userObj = user.toObject();
