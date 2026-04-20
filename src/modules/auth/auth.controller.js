@@ -35,9 +35,22 @@ const login = async (req, res) => {
   }
 };
 
+const logout = async (req, res) => {
+  await authService.logout(req.user.id);
+  res.clearCookie("refreshToken");
+  ApiResponse.ok(res, "Logged out successfully");
+};
+
+const verifyEmail = async (req, res) => {
+  await authService.verifyEmail(req.params.token);
+  ApiResponse.ok(res, "Email verified successfully");
+};
+
 const controller = {
   register,
   login,
+  logout,
+  verifyEmail
 };
 
 export default controller;

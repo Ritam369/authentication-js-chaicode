@@ -1,6 +1,7 @@
 import crypto from "crypto"
 import ApiError from "../../common/utils/api-error.js";
 import { generateResetToken, generateAccessToken, generateRefreshToken, verifyAccessToken, verifyRefreshToken } from "../../common/utils/jwt.utils.js";
+import { sendVerificationEmail, sendResetPasswordEmail } from "../../common/config/email.js";
 import User from "./auth.model.js"
 
 const hashToken = (pass) =>
@@ -21,7 +22,12 @@ const register = async ({ fname, lname, email, password, role }) => {
     verificationToken: hashedToken,
   });
 
-  // TODO: send an email to user with token: rawToken
+  // Don't let email failure crash registration — user is already created
+  try {
+    await sendVerificationEmail(email, rawToken);
+  } catch (err) {
+    console.error("Failed to send verification email:", err.message);
+  }
 
   const userObj = user.toObject();
   delete userObj.password;
@@ -38,9 +44,9 @@ const login = async ({ email, password }) => {
   const isMatch = await user.comparePassword(password);
   if (!isMatch) throw ApiError.unauthorized("Invalid email or password");
 
-//   if (!user.isVerified) {
-//     throw ApiError.forbidden("Please verify your email before logging in");
-//   }
+  if (!user.isVerified) {
+    throw ApiError.forbidden("Please verify your email before logging in");
+  }
 
   const accessToken = generateAccessToken({ id: user._id, role: user.role });
   const refreshToken = generateRefreshToken({ id: user._id });
@@ -56,4 +62,37 @@ const login = async ({ email, password }) => {
   return { user: userObj, accessToken, refreshToken };
 };
 
-export { register, login }
+const logout = async (userId) => {
+  // Clear stored refresh token so it can't be reused
+  await User.findByIdAndUpdate(userId, { refreshToken: null });
+};
+
+const verifyEmail = async (token) => {
+  const trimmed = String(token).trim();
+  if (!trimmed) {
+    throw ApiError.badRequest("Invalid or expired verification token");
+  }
+
+  // DB stores SHA256(raw). Links / email use the raw token — we hash for lookup.
+  // If you paste the hash from MongoDB into Postman, hashing again would not match;
+  // so we also try a direct match on the stored value.
+  const hashedInput = hashToken(trimmed);
+  let user = await User.findOne({ verificationToken: hashedInput }).select(
+    "+verificationToken",
+  );
+  if (!user) {
+    user = await User.findOne({ verificationToken: trimmed }).select(
+      "+verificationToken",
+    );
+  }
+  if (!user) throw ApiError.badRequest("Invalid or expired verification token");
+
+  await User.findByIdAndUpdate(user._id, {
+    $set: { isVerified: true },
+    $unset: { verificationToken: 1 },
+  });
+
+  return user;
+};
+
+export { register, login, logout, verifyEmail }
